@@ -68,6 +68,7 @@ export const TIPS_FOR_PEOPLE: Tip[] = [
   { title: "Wear light colours", detail: "Ticks are easier to spot and brush off light-coloured clothes." },
   { title: "Use repellent", detail: "Use insect repellent on skin and clothes. Products containing DEET work best." },
   { title: "Check after walks", detail: "Check yourself, children and pets for ticks after being outdoors." },
+  { title: "Check hidden spots", detail: "Ticks like warm places, so check behind your knees, armpits, waistband and hairline." },
 ];
 
 // Source: ESCCAP UK, "Ticks" (esccapuk.org.uk).
