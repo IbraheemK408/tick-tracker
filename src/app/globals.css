@@ -3,6 +3,8 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* Lets the browser draw dropdown lists and date pickers in dark colours in dark mode */
+  color-scheme: light dark;
 }
 
 @theme inline {
