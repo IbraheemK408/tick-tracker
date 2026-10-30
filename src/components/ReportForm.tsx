@@ -39,7 +39,7 @@ export default function ReportForm() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault(); // stop the browser reloading the page
     setTriedToSend(true);
-    if (errorMessages.length > 0) return;
+    if (errorMessages.length > 0 || !supabase) return;
 
     setStatus("sending");
     try {
@@ -79,6 +79,16 @@ export default function ReportForm() {
     choosePhoto(null);
     setTriedToSend(false);
     setStatus("editing");
+  }
+
+  // No database connected (e.g. someone ran the project without a .env.local file)
+  if (!supabase) {
+    return (
+      <p role="alert" className="rounded-lg border border-amber-600/50 bg-amber-600/10 p-4 text-sm">
+        Reporting isn&apos;t set up on this copy of the site yet. To turn it on, add Supabase keys to a
+        .env.local file (see the README).
+      </p>
+    );
   }
 
   // Success message
