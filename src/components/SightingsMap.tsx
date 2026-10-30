@@ -1,7 +1,7 @@
 "use client";
 
 import "leaflet/dist/leaflet.css";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { CircleMarker, MapContainer, TileLayer, Tooltip, useMap } from "react-leaflet";
 import { SEVERITY_COLOURS, type CitySummary } from "@/lib/severity";
 
@@ -14,6 +14,18 @@ type Props = {
 };
 
 export default function SightingsMap({ cities, selectedCity, onSelect }: Props) {
+  // Next.js keeps a page alive in the background after you leave it, so going
+  // back is instant. Leaflet breaks if it's paused like that, so we remove the
+  // map when the page is hidden and build a fresh one when it's shown again.
+  const [showMap, setShowMap] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- runs when the page is shown
+    setShowMap(true);
+    return () => setShowMap(false); // runs when the page is hidden
+  }, []);
+
+  if (!showMap) return null;
+
   const maxCount = Math.max(1, ...cities.map((c) => c.count));
 
   return (
