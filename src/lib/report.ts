@@ -1,72 +1,84 @@
 import { CITY_COORDINATES } from "@/lib/cities";
 import { SPECIES } from "@/lib/education";
 
-// Rules for the Report a Sighting form. The same limits are enforced again
-// by the database (supabase/setup.sql), so bad data can't get in either way.
+// Rules for the Report a Sighting form. The database has the same rules
+// (supabase/setup.sql), so bad data can't get in even without the form.
 
 export const CITY_OPTIONS = Object.keys(CITY_COORDINATES).sort();
-export const NOT_SURE = "Not sure";
-export const SPECIES_OPTIONS = [...SPECIES.map((s) => s.name), NOT_SURE];
+export const SPECIES_OPTIONS = [...SPECIES.map((s) => s.name), "Not sure"];
 
 export const MAX_NOTES_LENGTH = 500;
-export const MAX_PHOTO_BYTES = 5 * 1024 * 1024; // 5 MB
+export const MAX_PHOTO_SIZE = 5 * 1024 * 1024; // 5 MB in bytes
 export const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
-export type ReportValues = {
-  date: string; // "2026-10-27"
-  time: string; // "14:30"
+// What the user typed into the form.
+export type Report = {
+  date: string; // e.g. "2026-10-27"
+  time: string; // e.g. "14:30"
   location: string;
   species: string;
   notes: string;
   photo: File | null;
 };
 
-export type Field = keyof ReportValues;
-
-// Errors stop the form from sending. Warnings don't, but ask the user to double-check.
-export type CheckResult = {
-  errors: Partial<Record<Field, string>>;
-  warnings: Partial<Record<Field, string>>;
+// A message for each field that has a problem (fields without one are left out).
+export type Messages = {
+  date?: string;
+  time?: string;
+  location?: string;
+  species?: string;
+  notes?: string;
+  photo?: string;
 };
 
-const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+const ONE_YEAR = 365 * 24 * 60 * 60 * 1000; // in milliseconds
 
-export function checkReport(values: ReportValues, now = new Date()): CheckResult {
-  const errors: CheckResult["errors"] = {};
-  const warnings: CheckResult["warnings"] = {};
+// Checks the form. Errors stop it from sending.
+// Warnings still let it send, but ask the user to double-check.
+export function checkReport(report: Report) {
+  const errors: Messages = {};
+  const warnings: Messages = {};
+  const now = new Date();
 
-  // Date and time are checked together, because together they make one moment.
-  const sightedAt = new Date(`${values.date}T${values.time || "00:00"}`);
-  if (!values.date) {
+  // Date (checked together with the time, as one moment)
+  const seenAt = new Date(`${report.date}T${report.time || "00:00"}`);
+  if (!report.date) {
     errors.date = "Please enter the date you saw the tick.";
-  } else if (Number.isNaN(sightedAt.getTime())) {
-    errors.date = "Please enter a valid date.";
-  } else if (sightedAt > now) {
+  } else if (seenAt > now) {
     errors.date = "The date and time can't be in the future.";
-  } else if (sightedAt.getFullYear() < 2000) {
+  } else if (seenAt.getFullYear() < 2000) {
     errors.date = "Please enter a date from 2000 onwards.";
-  } else if (now.getTime() - sightedAt.getTime() > ONE_YEAR_MS) {
+  } else if (now.getTime() - seenAt.getTime() > ONE_YEAR) {
     warnings.date = "This was over a year ago. Please check the date is right before sending.";
   }
 
-  if (!values.time) errors.time = "Please enter roughly what time you saw the tick.";
+  // Time
+  if (!report.time) {
+    errors.time = "Please enter roughly what time you saw the tick.";
+  }
 
-  if (!CITY_OPTIONS.includes(values.location)) errors.location = "Please choose the nearest city.";
+  // City
+  if (!CITY_OPTIONS.includes(report.location)) {
+    errors.location = "Please choose the nearest city.";
+  }
 
-  if (!SPECIES_OPTIONS.includes(values.species)) {
+  // Species
+  if (!SPECIES_OPTIONS.includes(report.species)) {
     errors.species = "Please choose a species, or “Not sure”.";
-  } else if (values.species === NOT_SURE && !values.photo) {
+  } else if (report.species === "Not sure" && !report.photo) {
     warnings.species = "Not sure of the species? Adding a photo helps experts identify it.";
   }
 
-  if (values.notes.length > MAX_NOTES_LENGTH) {
+  // Notes
+  if (report.notes.length > MAX_NOTES_LENGTH) {
     errors.notes = `Notes can be up to ${MAX_NOTES_LENGTH} characters.`;
   }
 
-  if (values.photo) {
-    if (!PHOTO_TYPES.includes(values.photo.type)) {
+  // Photo
+  if (report.photo) {
+    if (!PHOTO_TYPES.includes(report.photo.type)) {
       errors.photo = "Photos must be JPG, PNG or WebP images.";
-    } else if (values.photo.size > MAX_PHOTO_BYTES) {
+    } else if (report.photo.size > MAX_PHOTO_SIZE) {
       errors.photo = "Photos must be 5 MB or smaller.";
     }
   }
@@ -74,8 +86,10 @@ export function checkReport(values: ReportValues, now = new Date()): CheckResult
   return { errors, warnings };
 }
 
-// Today's date as "YYYY-MM-DD" in the user's own time zone (for the date picker's max).
-export function todayString(now = new Date()): string {
-  const offset = now.getTimezoneOffset() * 60 * 1000;
-  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+// Today's date as "YYYY-MM-DD", which is the format date inputs use.
+export function today(): string {
+  const d = new Date();
+  const month = String(d.getMonth() + 1).padStart(2, "0"); // months start at 0
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${month}-${day}`;
 }

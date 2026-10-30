@@ -2,18 +2,13 @@
 
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import SightingDetails from "@/components/SightingDetails";
 import { CITY_COORDINATES } from "@/lib/cities";
 import type { Sighting } from "@/lib/sightings";
-import {
-  SEVERITY_COLOURS,
-  SEVERITY_LEVELS,
-  summariseByCity,
-  type Severity,
-} from "@/lib/severity";
+import { SEVERITY_COLOURS, SEVERITY_LEVELS, summariseByCity, type Severity } from "@/lib/severity";
 
-// Leaflet needs the browser's `window`, so the map is only loaded in the browser.
+// Leaflet only works in the browser, so the map isn't loaded on the server.
 const SightingsMap = dynamic(() => import("@/components/SightingsMap"), {
   ssr: false,
   loading: () => <p className="p-4">Loading map…</p>,
@@ -21,57 +16,45 @@ const SightingsMap = dynamic(() => import("@/components/SightingsMap"), {
 
 const CITY_NAMES = Object.keys(CITY_COORDINATES).sort();
 
-// Holds the filter choices and works out what the map should show.
+// The map page: filters on the left, map in the middle, details on the right.
 export default function TickExplorer({ sightings }: { sightings: Sighting[] }) {
-  // Sightings arrive sorted newest first.
-  const earliest = sightings.at(-1)?.date.slice(0, 10) ?? "";
-  const latest = sightings[0]?.date.slice(0, 10) ?? "";
-  const allSpecies = useMemo(
-    () => [...new Set(sightings.map((s) => s.species))].sort(),
-    [sightings],
-  );
+  // Sightings come in newest first, so the last one is the oldest.
+  // .slice(0, 10) turns "2022-08-01T06:40:31" into "2022-08-01".
+  const latest = sightings[0].date.slice(0, 10);
+  const earliest = sightings[sightings.length - 1].date.slice(0, 10);
 
+  // List of every species, without repeats.
+  const allSpecies: string[] = [];
+  for (const s of sightings) {
+    if (!allSpecies.includes(s.species)) allSpecies.push(s.species);
+  }
+  allSpecies.sort();
+
+  // The filter choices. Everything is selected to begin with.
   const [from, setFrom] = useState(earliest);
   const [to, setTo] = useState(latest);
-  const [species, setSpecies] = useState<string[]>(allSpecies);
-  const [severities, setSeverities] = useState<Severity[]>(SEVERITY_LEVELS);
+  const [species, setSpecies] = useState(allSpecies);
+  const [severities, setSeverities] = useState(SEVERITY_LEVELS);
 
-  // The selected city lives in the page address (e.g. /?city=Leeds),
-  // so a shared link opens with that city already selected.
-  const searchParams = useSearchParams();
-  const selectedCity = searchParams.get("city");
+  // The selected city is kept in the web address, e.g. /?city=Leeds,
+  // so if someone shares the link it opens on the same city.
+  const selectedCity = useSearchParams().get("city");
 
   function selectCity(city: string | null) {
-    const params = new URLSearchParams(window.location.search);
-    if (city) params.set("city", city);
-    else params.delete("city");
-    const query = params.toString();
-    window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
+    const newUrl = city ? `?city=${encodeURIComponent(city)}` : window.location.pathname;
+    window.history.replaceState(null, "", newUrl);
   }
 
-  // 1. Keep only sightings inside the date range and chosen species.
-  const filtered = useMemo(
-    () =>
-      sightings.filter((s) => {
-        const day = s.date.slice(0, 10);
-        return day >= from && day <= to && species.includes(s.species);
-      }),
-    [sightings, from, to, species],
-  );
+  // Tick or untick a species / severity checkbox.
+  function toggleSpecies(name: string) {
+    if (species.includes(name)) setSpecies(species.filter((s) => s !== name));
+    else setSpecies([...species, name]);
+  }
 
-  // 2. Group by city and work out severity, then 3. hide unchosen severities.
-  const cities = useMemo(
-    () => summariseByCity(filtered).filter((c) => severities.includes(c.severity)),
-    [filtered, severities],
-  );
-  const shownCount = cities.reduce((sum, c) => sum + c.count, 0);
-
-  const selectedSummary = cities.find((c) => c.city === selectedCity);
-  const selectedSightings = useMemo(
-    () => filtered.filter((s) => s.location === selectedCity),
-    [filtered, selectedCity],
-  );
-  const years = yearsBetween(from, to);
+  function toggleSeverity(level: Severity) {
+    if (severities.includes(level)) setSeverities(severities.filter((s) => s !== level));
+    else setSeverities([...severities, level]);
+  }
 
   function resetFilters() {
     setFrom(earliest);
@@ -80,9 +63,34 @@ export default function TickExplorer({ sightings }: { sightings: Sighting[] }) {
     setSeverities(SEVERITY_LEVELS);
   }
 
+  // 1. Keep only the sightings inside the date range and ticked species.
+  const filtered = sightings.filter((s) => {
+    const day = s.date.slice(0, 10);
+    return day >= from && day <= to && species.includes(s.species);
+  });
+
+  // 2. Group them by city and work out each city's severity.
+  // 3. Hide cities whose severity is unticked.
+  const cities = summariseByCity(filtered).filter((c) => severities.includes(c.severity));
+
+  let shownCount = 0;
+  for (const c of cities) shownCount += c.count;
+
+  // Details for the city that's been clicked (if any).
+  const selectedSummary = cities.find((c) => c.city === selectedCity);
+  const selectedSightings = filtered.filter((s) => s.location === selectedCity);
+
+  // Every year in the date range, for the timeline chart, e.g. 2012 to 2024.
+  const years: string[] = [];
+  for (let y = Number(from.slice(0, 4)); y <= Number(to.slice(0, 4)); y++) {
+    years.push(String(y));
+  }
+
+  const inputClass = "mt-1 block w-full rounded border border-current/30 bg-transparent p-1.5";
+
   return (
-    // Phones: everything stacked. Medium screens: filters | map, details under the map.
-    // Wide screens: filters | map | details side by side.
+    // Phone: everything stacked. Laptop: filters | map, details under the map.
+    // Wide screen: filters | map | details.
     <div className="grid gap-6 lg:grid-cols-[16rem_1fr] xl:grid-cols-[16rem_1fr_20rem]">
       <aside className="flex flex-col gap-5 lg:row-span-2 xl:row-span-1" aria-label="Map filters">
         <fieldset>
@@ -95,7 +103,7 @@ export default function TickExplorer({ sightings }: { sightings: Sighting[] }) {
               min={earliest}
               max={to}
               onChange={(e) => setFrom(e.target.value || earliest)}
-              className="mt-1 block w-full rounded border border-current/30 bg-transparent p-1.5"
+              className={inputClass}
             />
           </label>
           <label className="mt-2 block text-sm">
@@ -106,7 +114,7 @@ export default function TickExplorer({ sightings }: { sightings: Sighting[] }) {
               min={from}
               max={latest}
               onChange={(e) => setTo(e.target.value || latest)}
-              className="mt-1 block w-full rounded border border-current/30 bg-transparent p-1.5"
+              className={inputClass}
             />
           </label>
         </fieldset>
@@ -115,11 +123,7 @@ export default function TickExplorer({ sightings }: { sightings: Sighting[] }) {
           <legend className="font-semibold">Species</legend>
           {allSpecies.map((name) => (
             <label key={name} className="mt-1.5 flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={species.includes(name)}
-                onChange={() => setSpecies(toggle(species, name))}
-              />
+              <input type="checkbox" checked={species.includes(name)} onChange={() => toggleSpecies(name)} />
               {name}
             </label>
           ))}
@@ -130,11 +134,7 @@ export default function TickExplorer({ sightings }: { sightings: Sighting[] }) {
           <p className="text-xs opacity-70">Based on how many sightings a city has compared with other cities.</p>
           {SEVERITY_LEVELS.map((level) => (
             <label key={level} className="mt-1.5 flex items-center gap-2 text-sm capitalize">
-              <input
-                type="checkbox"
-                checked={severities.includes(level)}
-                onChange={() => setSeverities(toggle(severities, level))}
-              />
+              <input type="checkbox" checked={severities.includes(level)} onChange={() => toggleSeverity(level)} />
               <span
                 aria-hidden
                 className="inline-block h-3 w-3 rounded-full"
@@ -158,7 +158,7 @@ export default function TickExplorer({ sightings }: { sightings: Sighting[] }) {
         </p>
       </aside>
 
-      {/* On wide screens the map fills the screen height and stays put while the side panels scroll */}
+      {/* On wide screens the map stays in place while the side panels scroll */}
       <section
         className="h-[60vh] min-h-[400px] xl:sticky xl:top-6 xl:h-[calc(100vh-3rem)] xl:self-start"
         aria-label="Sightings map"
@@ -178,16 +178,4 @@ export default function TickExplorer({ sightings }: { sightings: Sighting[] }) {
       </aside>
     </div>
   );
-}
-
-// Adds the item to the list if it's missing, or removes it if it's there.
-function toggle<T>(list: T[], item: T): T[] {
-  return list.includes(item) ? list.filter((x) => x !== item) : [...list, item];
-}
-
-// Every year from one date to another, e.g. "2012", "2013", … "2024".
-function yearsBetween(from: string, to: string): string[] {
-  const years: string[] = [];
-  for (let y = Number(from.slice(0, 4)); y <= Number(to.slice(0, 4)); y++) years.push(String(y));
-  return years;
 }

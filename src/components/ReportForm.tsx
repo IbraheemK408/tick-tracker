@@ -2,96 +2,67 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import {
-  CITY_OPTIONS,
-  MAX_NOTES_LENGTH,
-  SPECIES_OPTIONS,
-  checkReport,
-  todayString,
-  type Field,
-  type ReportValues,
-} from "@/lib/report";
-import { PHOTO_BUCKET, supabase } from "@/lib/supabase";
-
-type Status = "editing" | "sending" | "sent" | "failed";
-
-const FIELD_ORDER: Field[] = ["date", "time", "location", "species", "notes", "photo"];
-const inputClass = "mt-1 block w-full rounded border bg-transparent p-1.5";
-
-function emptyForm(city: string | null): ReportValues {
-  return {
-    date: todayString(),
-    time: "",
-    location: city && CITY_OPTIONS.includes(city) ? city : "",
-    species: "",
-    notes: "",
-    photo: null,
-  };
-}
+import { useState, type FormEvent, type ReactNode } from "react";
+import { CITY_OPTIONS, MAX_NOTES_LENGTH, SPECIES_OPTIONS, checkReport, today, type Report } from "@/lib/report";
+import { supabase } from "@/lib/supabase";
 
 export default function ReportForm() {
-  // Coming from a city's "Report" button on the map pre-fills the location.
-  const cityFromLink = useSearchParams().get("city");
+  // If the user came from a city's "Report" button (e.g. /report?city=Leeds),
+  // start with that city chosen.
+  const cityFromLink = useSearchParams().get("city") || "";
 
-  const [values, setValues] = useState<ReportValues>(() => emptyForm(cityFromLink));
-  const [touched, setTouched] = useState<Partial<Record<Field, boolean>>>({});
+  // One piece of state for each field.
+  const [date, setDate] = useState(today());
+  const [time, setTime] = useState("");
+  const [location, setLocation] = useState(CITY_OPTIONS.includes(cityFromLink) ? cityFromLink : "");
+  const [species, setSpecies] = useState("");
+  const [notes, setNotes] = useState("");
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState("");
+
+  // "editing" → "sending" → "sent" (or "failed" if something went wrong)
+  const [status, setStatus] = useState("editing");
+  // Errors only show after the user presses Send, so they aren't told off while typing.
   const [triedToSend, setTriedToSend] = useState(false);
-  const [status, setStatus] = useState<Status>("editing");
-  const [sentReport, setSentReport] = useState<ReportValues | null>(null);
-  // Changing this key clears the file picker, which React can't reset directly.
-  const [fileInputKey, setFileInputKey] = useState(0);
 
-  const { errors, warnings } = checkReport(values);
-  const errorList = FIELD_ORDER.filter((f) => errors[f]);
-  // Only show a field's error once the user has left it or tried to send,
-  // so they aren't told off before they've had a chance to type.
-  const showError = (field: Field) => (triedToSend || touched[field]) && errors[field];
+  const report: Report = { date, time, location, species, notes, photo };
+  const { errors, warnings } = checkReport(report);
+  const errorMessages = Object.values(errors);
+  const show = triedToSend ? errors : {};
 
-  // Show a small preview of the chosen photo, and free the memory when it changes.
-  const photoPreview = useMemo(() => (values.photo ? URL.createObjectURL(values.photo) : null), [values.photo]);
-  useEffect(() => {
-    return () => {
-      if (photoPreview) URL.revokeObjectURL(photoPreview);
-    };
-  }, [photoPreview]);
-
-  function update<K extends Field>(field: K, value: ReportValues[K]) {
-    setValues((v) => ({ ...v, [field]: value }));
-    if (status === "failed") setStatus("editing");
+  function choosePhoto(file: File | null) {
+    setPhoto(file);
+    // A temporary link to the file on the user's computer, used for the preview.
+    setPhotoPreview(file ? URL.createObjectURL(file) : "");
   }
 
-  const leave = (field: Field) => () => setTouched((t) => ({ ...t, [field]: true }));
-
   async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+    e.preventDefault(); // stop the browser reloading the page
     setTriedToSend(true);
-    if (errorList.length > 0) {
-      document.getElementById(errorList[0])?.focus();
-      return;
-    }
+    if (errorMessages.length > 0) return;
 
     setStatus("sending");
     try {
-      // Upload the photo first (if there is one), so the sighting can point to it.
-      let photoPath: string | null = null;
-      if (values.photo) {
-        const extension = values.photo.type.split("/")[1];
+      // 1. Upload the photo (if there is one) with a random name,
+      //    so two photos called "tick.jpg" don't overwrite each other.
+      let photoPath = null;
+      if (photo) {
+        const extension = photo.type.split("/")[1]; // "image/png" → "png"
         photoPath = `${crypto.randomUUID()}.${extension}`;
-        const upload = await supabase.storage.from(PHOTO_BUCKET).upload(photoPath, values.photo);
+        const upload = await supabase.storage.from("sighting-photos").upload(photoPath, photo);
         if (upload.error) throw upload.error;
       }
 
+      // 2. Save the sighting as a new row in the database.
       const { error } = await supabase.from("reported_sightings").insert({
-        sighted_at: new Date(`${values.date}T${values.time}`).toISOString(),
-        location: values.location,
-        species: values.species,
-        notes: values.notes.trim() || null,
+        sighted_at: new Date(`${date}T${time}`).toISOString(),
+        location,
+        species,
+        notes: notes.trim() || null,
         photo_path: photoPath,
       });
       if (error) throw error;
 
-      setSentReport(values);
       setStatus("sent");
     } catch (err) {
       console.error("Failed to send report", err);
@@ -100,26 +71,25 @@ export default function ReportForm() {
   }
 
   function startAgain() {
-    setValues(emptyForm(null));
-    setTouched({});
+    setDate(today());
+    setTime("");
+    setLocation("");
+    setSpecies("");
+    setNotes("");
+    choosePhoto(null);
     setTriedToSend(false);
-    setSentReport(null);
-    setFileInputKey((k) => k + 1);
     setStatus("editing");
   }
 
-  if (status === "sent" && sentReport) {
+  // Success message
+  if (status === "sent") {
+    const when = new Date(`${date}T${time}`).toLocaleString("en-GB", { dateStyle: "long", timeStyle: "short" });
     return (
       <div role="status" className="rounded-lg border border-green-700/50 bg-green-700/10 p-4">
         <h2 className="font-semibold">Thank you, your sighting has been sent</h2>
         <p className="mt-2 text-sm">
-          {sentReport.species === "Not sure" ? "A tick" : `A ${sentReport.species.toLowerCase()}`} in{" "}
-          {sentReport.location} on{" "}
-          {new Date(`${sentReport.date}T${sentReport.time}`).toLocaleString("en-GB", {
-            dateStyle: "long",
-            timeStyle: "short",
-          })}
-          {sentReport.photo && ", with a photo"}.
+          {species === "Not sure" ? "A tick" : `A ${species.toLowerCase()}`} in {location} on {when}
+          {photo && ", with a photo"}.
         </p>
         <div className="mt-4 flex flex-wrap gap-2 text-sm">
           <button
@@ -130,75 +100,69 @@ export default function ReportForm() {
             Report another sighting
           </button>
           <Link
-            href={`/?city=${encodeURIComponent(sentReport.location)}`}
+            href={`/?city=${encodeURIComponent(location)}`}
             className="rounded border border-current/30 px-3 py-1.5 hover:bg-current/10"
           >
-            See {sentReport.location} on the map
+            See {location} on the map
           </Link>
         </div>
       </div>
     );
   }
 
+  // The form
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-5">
-      {triedToSend && errorList.length > 0 && (
+      {triedToSend && errorMessages.length > 0 && (
         <div role="alert" className="rounded-lg border border-red-700/50 bg-red-700/10 p-4 text-sm">
-          <p className="font-semibold">Please fix {errorList.length === 1 ? "this" : "these"} before sending:</p>
+          <p className="font-semibold">Please fix these before sending:</p>
           <ul className="mt-1 list-disc pl-5">
-            {errorList.map((f) => (
-              <li key={f}>
-                <a href={`#${f}`} className="underline">
-                  {errors[f]}
-                </a>
-              </li>
+            {errorMessages.map((message) => (
+              <li key={message}>{message}</li>
             ))}
           </ul>
         </div>
       )}
 
       <div className="grid gap-5 sm:grid-cols-2">
-        <FormField field="date" label="Date seen" error={showError("date")} warning={warnings.date}>
+        <Field id="date" label="Date seen" error={show.date} warning={warnings.date}>
           <input
             id="date"
             type="date"
-            max={todayString()}
-            value={values.date}
-            onChange={(e) => update("date", e.target.value)}
-            onBlur={leave("date")}
-            {...fieldProps("date", showError("date"), warnings.date)}
+            max={today()}
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className={inputClass(show.date, warnings.date)}
           />
-        </FormField>
+        </Field>
 
-        <FormField field="time" label="Time seen" hint="Roughly is fine." error={showError("time")}>
+        <Field id="time" label="Time seen" hint="Roughly is fine." error={show.time}>
           <input
             id="time"
             type="time"
-            value={values.time}
-            onChange={(e) => update("time", e.target.value)}
-            onBlur={leave("time")}
-            {...fieldProps("time", showError("time"))}
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+            className={inputClass(show.time)}
           />
-        </FormField>
+        </Field>
       </div>
 
-      <FormField field="location" label="Nearest city" error={showError("location")}>
+      <Field id="location" label="Nearest city" error={show.location}>
         <select
           id="location"
-          value={values.location}
-          onChange={(e) => update("location", e.target.value)}
-          onBlur={leave("location")}
-          {...fieldProps("location", showError("location"))}
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+          className={inputClass(show.location)}
         >
           <option value="">Choose a city</option>
           {CITY_OPTIONS.map((city) => (
             <option key={city}>{city}</option>
           ))}
         </select>
-      </FormField>
+      </Field>
 
-      <FormField
-        field="species"
+      <Field
+        id="species"
         label="Species"
         hint={
           <>
@@ -209,58 +173,50 @@ export default function ReportForm() {
             or choose &ldquo;Not sure&rdquo;.
           </>
         }
-        error={showError("species")}
+        error={show.species}
         warning={warnings.species}
       >
         <select
           id="species"
-          value={values.species}
-          onChange={(e) => update("species", e.target.value)}
-          onBlur={leave("species")}
-          {...fieldProps("species", showError("species"), warnings.species)}
+          value={species}
+          onChange={(e) => setSpecies(e.target.value)}
+          className={inputClass(show.species, warnings.species)}
         >
           <option value="">Choose a species</option>
           {SPECIES_OPTIONS.map((name) => (
             <option key={name}>{name}</option>
           ))}
         </select>
-      </FormField>
+      </Field>
 
-      <FormField
-        field="notes"
+      <Field
+        id="notes"
         label="Notes (optional)"
-        hint={`Where exactly, what you were doing, or whether it bit a person or pet. ${values.notes.length}/${MAX_NOTES_LENGTH} characters.`}
-        error={showError("notes")}
+        hint={`Where exactly, what you were doing, or whether it bit a person or pet. ${notes.length}/${MAX_NOTES_LENGTH} characters.`}
+        error={show.notes}
       >
         <textarea
           id="notes"
           rows={3}
-          value={values.notes}
-          onChange={(e) => update("notes", e.target.value)}
-          onBlur={leave("notes")}
-          {...fieldProps("notes", showError("notes"))}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          className={inputClass(show.notes)}
         />
-      </FormField>
+      </Field>
 
-      <FormField field="photo" label="Photo (optional)" hint="JPG, PNG or WebP, up to 5 MB." error={showError("photo")}>
+      <Field id="photo" label="Photo (optional)" hint="JPG, PNG or WebP, up to 5 MB." error={errors.photo}>
         <input
-          key={fileInputKey}
           id="photo"
           type="file"
           accept="image/jpeg,image/png,image/webp"
-          onChange={(e) => {
-            update("photo", e.target.files?.[0] ?? null);
-            setTouched((t) => ({ ...t, photo: true }));
-          }}
-          {...fieldProps("photo", showError("photo"))}
-          className={`${fieldProps("photo", showError("photo")).className} text-sm file:mr-3 file:rounded file:border-0 file:bg-current/10 file:px-3 file:py-1`}
+          onChange={(e) => choosePhoto(e.target.files?.[0] || null)}
+          className={`${inputClass(errors.photo)} text-sm file:mr-3 file:rounded file:border-0 file:bg-current/10 file:px-3 file:py-1`}
         />
         {photoPreview && !errors.photo && (
-          // A local preview of the user's own file, so next/image isn't needed.
           // eslint-disable-next-line @next/next/no-img-element
           <img src={photoPreview} alt="Preview of your photo" className="mt-2 max-h-48 rounded border border-current/20" />
         )}
-      </FormField>
+      </Field>
 
       {status === "failed" && (
         <p role="alert" className="rounded-lg border border-red-700/50 bg-red-700/10 p-4 text-sm">
@@ -279,50 +235,32 @@ export default function ReportForm() {
   );
 }
 
-// Shared attributes that link an input to its error/warning text for screen readers
-// and colour its border to match.
-function fieldProps(field: Field, error?: string | false, warning?: string) {
-  const border = error ? "border-red-600" : warning ? "border-amber-500" : "border-current/30";
-  return {
-    "aria-invalid": error ? true : undefined,
-    "aria-describedby": `${field}-hint ${field}-message`,
-    className: `${inputClass} ${border}`,
-  };
+// Red border for an error, orange for a warning, grey otherwise.
+function inputClass(error?: string, warning?: string) {
+  let border = "border-current/30";
+  if (error) border = "border-red-600";
+  else if (warning) border = "border-amber-500";
+  return `mt-1 block w-full rounded border bg-transparent p-1.5 ${border}`;
 }
 
-function FormField({
-  field,
-  label,
-  hint,
-  error,
-  warning,
-  children,
-}: {
-  field: Field;
+// A label, the input itself, an optional hint, and an error or warning message underneath.
+function Field(props: {
+  id: string;
   label: string;
-  hint?: React.ReactNode;
-  error?: string | false;
+  hint?: ReactNode;
+  error?: string;
   warning?: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div>
-      <label htmlFor={field} className="block text-sm font-medium">
-        {label}
+      <label htmlFor={props.id} className="block text-sm font-medium">
+        {props.label}
       </label>
-      {children}
-      {hint && (
-        <p id={`${field}-hint`} className="mt-1 text-xs opacity-70">
-          {hint}
-        </p>
-      )}
-      <p id={`${field}-message`} aria-live="polite" className="text-sm">
-        {error ? (
-          <span className="text-red-600">{error}</span>
-        ) : (
-          warning && <span className="text-amber-600">⚠ {warning}</span>
-        )}
-      </p>
+      {props.children}
+      {props.hint && <p className="mt-1 text-xs opacity-70">{props.hint}</p>}
+      {props.error && <p className="text-sm text-red-600">{props.error}</p>}
+      {!props.error && props.warning && <p className="text-sm text-amber-600">⚠ {props.warning}</p>}
     </div>
   );
 }

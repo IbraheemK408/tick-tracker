@@ -74,7 +74,7 @@ export default function SightingDetails({
     year,
     sightings: citySightings.filter((s) => s.date.startsWith(year)).length,
   }));
-  const speciesCounts = countBy(citySightings.map((s) => s.species));
+  const speciesCounts = countSpecies(citySightings);
 
   return (
     <div className="flex flex-col gap-5">
@@ -105,10 +105,10 @@ export default function SightingDetails({
       <section>
         <h3 className="font-semibold">Species seen</h3>
         <ul className="mt-1 text-sm">
-          {speciesCounts.map(([name, count]) => (
-            <li key={name} className="flex justify-between border-b border-current/10 py-1">
-              <span>{name}</span>
-              <span>{count}</span>
+          {speciesCounts.map((item) => (
+            <li key={item.name} className="flex justify-between border-b border-current/10 py-1">
+              <span>{item.name}</span>
+              <span>{item.count}</span>
             </li>
           ))}
         </ul>
@@ -153,23 +153,25 @@ function QuickActions({ city, lat, lng }: { city: string; lat: number; lng: numb
   const [shareMessage, setShareMessage] = useState("");
   const [manualLink, setManualLink] = useState("");
 
+  // Tries three ways to share, in order:
+  // 1. the phone's share menu, 2. copy the link, 3. show the link to copy by hand.
   async function share() {
     const url = `${window.location.origin}/?city=${encodeURIComponent(city)}`;
-    // Phones (and some browsers) have a built-in share menu; otherwise copy the link.
+
     if (navigator.share) {
       try {
         await navigator.share({ title: `Tick sightings in ${city}`, url });
       } catch {
-        // The user closed the share menu – nothing to do.
+        // The user closed the share menu, so do nothing.
       }
       return;
     }
+
     try {
       await navigator.clipboard.writeText(url);
       setShareMessage("Link copied!");
-      setTimeout(() => setShareMessage(""), 3000);
     } catch {
-      // Some browsers block clipboard access, so show the link to copy by hand.
+      // Some browsers block copying.
       setManualLink(url);
     }
   }
@@ -217,9 +219,14 @@ function QuickActions({ city, lat, lng }: { city: string; lat: number; lng: numb
   );
 }
 
-// Counts how many times each value appears, most common first.
-function countBy(values: string[]): [string, number][] {
-  const tally = new Map<string, number>();
-  for (const v of values) tally.set(v, (tally.get(v) ?? 0) + 1);
-  return [...tally.entries()].sort((a, b) => b[1] - a[1]);
+// How many sightings of each species, most common first.
+function countSpecies(sightings: Sighting[]) {
+  const counts: Record<string, number> = {};
+  for (const s of sightings) {
+    counts[s.species] = (counts[s.species] || 0) + 1;
+  }
+
+  const list = Object.keys(counts).map((name) => ({ name, count: counts[name] }));
+  list.sort((a, b) => b.count - a.count);
+  return list;
 }
