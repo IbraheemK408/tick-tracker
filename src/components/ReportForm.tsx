@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useState, type ReactNode, type SubmitEvent } from "react";
 import { CITY_OPTIONS, MAX_NOTES_LENGTH, SPECIES_OPTIONS, checkReport, today, type Report } from "@/lib/report";
 import { supabase } from "@/lib/supabase";
 
@@ -36,7 +36,7 @@ export default function ReportForm() {
     setPhotoPreview(file ? URL.createObjectURL(file) : "");
   }
 
-  async function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault(); // stop the browser reloading the page
     setTriedToSend(true);
     if (errorMessages.length > 0 || !supabase) return;
