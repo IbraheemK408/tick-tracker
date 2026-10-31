@@ -26,9 +26,11 @@ export type CitySummary = {
 
 // Groups the sightings by city and gives each city a severity.
 //
-// The API doesn't have a severity field, so I made my own rule:
-// rank the cities by number of sightings and split them into thirds.
-// Bottom third = low, middle third = medium, top third = high.
+// The API doesn't have a severity field, so I made my own rule by
+// comparing each city with the average city:
+//   more than 120% of the average = high
+//   less than 80% of the average  = low
+//   anything in between           = medium
 // It uses the filtered sightings, so it changes when the filters change.
 export function summariseByCity(sightings: Sighting[]): CitySummary[] {
   // Step 1: put each city's sightings into its own list.
@@ -42,23 +44,22 @@ export function summariseByCity(sightings: Sighting[]): CitySummary[] {
 
   const cityNames = Object.keys(sightingsByCity);
 
-  // Step 2: build a summary for each city.
+  // Step 2: work out the average number of sightings per city.
+  // e.g. 1000 sightings across 14 cities = about 71 each
+  let total = 0;
+  for (const city of cityNames) total += sightingsByCity[city].length;
+  const average = total / cityNames.length;
+
+  // Step 3: build a summary for each city.
   const summaries: CitySummary[] = [];
   for (const city of cityNames) {
     const citySightings = sightingsByCity[city];
     const count = citySightings.length;
 
-    // Count how many cities have fewer sightings than this one.
-    let citiesWithFewer = 0;
-    for (const otherCity of cityNames) {
-      if (sightingsByCity[otherCity].length < count) citiesWithFewer++;
-    }
-
-    // e.g. 10 of 14 cities have fewer → 0.71 → top third → high
-    const position = citiesWithFewer / cityNames.length;
-    let severity: Severity = "high";
-    if (position < 1 / 3) severity = "low";
-    else if (position < 2 / 3) severity = "medium";
+    // e.g. average 71: more than 85 sightings = high, fewer than 57 = low
+    let severity: Severity = "medium";
+    if (count > average * 1.2) severity = "high";
+    else if (count < average * 0.8) severity = "low";
 
     summaries.push({
       city,

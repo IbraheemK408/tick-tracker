@@ -131,7 +131,7 @@ export default function TickExplorer({ sightings }: { sightings: Sighting[] }) {
 
         <fieldset>
           <legend className="font-semibold">Severity</legend>
-          <p className="text-xs opacity-70">Based on how many sightings a city has compared with other cities.</p>
+          <p className="text-xs opacity-70">Compared with the average city: high is over 20% above average, low is over 20% below.</p>
           {SEVERITY_LEVELS.map((level) => (
             <label key={level} className="mt-1.5 flex items-center gap-2 text-sm capitalize">
               <input type="checkbox" checked={severities.includes(level)} onChange={() => toggleSeverity(level)} />
