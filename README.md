@@ -86,7 +86,7 @@ I used sighting numbers because the API and brief don’t indicate how to calcul
 ## Accessibility
 
 - **Labels:** every form field has one, and errors are announced to screen readers if needed.
-- **Keyboard-friendly:** a dropdown works alongside clicking the map so you can click a city using both the keyboard and clicking.
+- **Keyboard-friendly:** a dropdown works alongside clicking the map so you can choose a city using both the keyboard and clicking.
 - **Colour and words:** severity colours are colour blind friendly and also labelled in words.
 - **Layouts:** phone, laptop and wide screen, with light and dark mode all providing a working user interface.
 
