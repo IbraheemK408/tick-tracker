@@ -6,7 +6,7 @@ A web app that shows where ticks have been seen across the UK, teaches people ho
 
 **Live site:** https://uk-tick-tracker.vercel.app
 
-**Video walkthrough:** (YouTube link to be added)
+**Video walkthrough:** https://youtu.be/4eTGRkSvRiQ
 
 ![The map page with Newcastle selected, showing the filters, the map and the details panel](screenshot.png)
 
